@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bioinformatics-etl-cli"
+version = "1.0.0"
+description = "Local-first CLI ETL toolkit for genomic TSV studies"
+requires-python = ">=3.10"
+authors = [
+    {name = "Bioinformatics Team", email = "team@example.com"},
+]
+readme = "README.md"
+dependencies = [
+    "polars>=1.0.0",
+    "SQLAlchemy>=2.0.0",
+    "pyodbc>=5.0.0",
+    "pydantic>=2.0.0",
+    "structlog>=23.0.0",
+    "tenacity>=8.0.0",
+    "typer[all]>=0.9.0",
+    "pyyaml>=6.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pytest-asyncio>=0.21.0"
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "B", "I", "UP", "N", "C4"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
