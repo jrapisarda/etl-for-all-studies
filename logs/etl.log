@@ -1,0 +1,6 @@
+2025-10-15 00:51:45,048 [INFO] etl_for_all_studies.pipeline - Loaded 3 gene identifiers from filter
+2025-10-15 00:51:45,108 [INFO] etl_for_all_studies.pipeline - Processing 1 studies with up to 2 concurrent workers
+2025-10-15 00:51:45,108 [ERROR] etl_for_all_studies.pipeline - Study GSE11907 failed: Study directory C:\testprojects\etl-for-all-studies\data\studies\GSE11907 missing metadata or expression TSV files
+2025-10-15 00:54:35,270 [INFO] etl_for_all_studies.pipeline - Loaded 144 gene identifiers from filter
+2025-10-15 00:54:35,309 [INFO] etl_for_all_studies.pipeline - Processing 1 studies with up to 2 concurrent workers
+2025-10-15 00:54:35,313 [ERROR] etl_for_all_studies.pipeline - Study GSE11907 failed: Study directory C:\testprojects\etl-for-all-studies\data\studies\GSE11907 missing metadata or expression TSV files
