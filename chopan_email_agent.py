@@ -96,6 +96,18 @@ def init_db(db_path: str = DB_PATH):
         )
     """)
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS generated_emails (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT,
+            name TEXT,
+            job_title TEXT,
+            company TEXT,
+            subject TEXT,
+            body TEXT,
+            generated_at TEXT
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS skips (
             email TEXT,
             reason TEXT,
@@ -128,6 +140,22 @@ def log_sent(conn, payload: Dict[str, Any]):
         payload.get("subject",""),
         payload.get("body",""),
         payload.get("message_id",""),
+        datetime.utcnow().isoformat(),
+    ))
+    conn.commit()
+
+def log_generated(conn, payload: Dict[str, Any]):
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO generated_emails (email, name, job_title, company, subject, body, generated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        (payload.get("email", "") or "").lower().strip(),
+        payload.get("name", ""),
+        payload.get("job_title", ""),
+        payload.get("company", ""),
+        payload.get("subject", ""),
+        payload.get("body", ""),
         datetime.utcnow().isoformat(),
     ))
     conn.commit()
@@ -194,6 +222,12 @@ def send_with_sendgrid(sg: SendGridAPIClient, from_email: str, to_email: str, su
         subject=subject,
         plain_text_content=body
     )
+    if getattr(message, "content", None):
+        for part in message.content:
+            try:
+                part.charset = "utf-8"
+            except AttributeError:
+                continue
     message.add_headers = {"X-Campaign": "chopan-foundation-outreach"}
     try:
         response = sg.send(message)
@@ -231,11 +265,7 @@ def process_batch(df: pd.DataFrame, start: int, batch_size: int, send: bool, xls
         gen = generate_email(openai_client, row_dict)
         subject = gen["subject"]
         body = gen["body"]
-        message_id = None
-        if send:
-            message_id = send_with_sendgrid(sg, DEFAULT_FROM_EMAIL, email, subject, body)
-            if not message_id:
-                message_id = ""
+        message_id = ""
         payload = {
             "email": email,
             "name": row_dict.get("Name",""),
@@ -243,9 +273,12 @@ def process_batch(df: pd.DataFrame, start: int, batch_size: int, send: bool, xls
             "company": row_dict.get("Company Name",""),
             "subject": subject,
             "body": body,
-            "message_id": message_id or ""
+            "message_id": message_id
         }
+        log_generated(conn, payload)
         if send:
+            message_id = send_with_sendgrid(sg, DEFAULT_FROM_EMAIL, email, subject, body) or ""
+            payload["message_id"] = message_id
             log_sent(conn, payload)
         sent_records.append(payload)
         time.sleep(0.5 if send else 0.0)
