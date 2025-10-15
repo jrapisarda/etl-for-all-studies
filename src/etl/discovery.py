@@ -31,6 +31,7 @@ class StudyDiscovery:
         if not self.input_root.exists():
             raise FileNotFoundError(f"Input root '{self.input_root}' does not exist")
 
+        studies = discover_study_dirs(self.input_root, self.required_files)
         studies = discover_study_dirs(self.input_root)
         if self.required_files:
             filtered: list[Path] = []

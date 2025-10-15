@@ -16,6 +16,8 @@ def configure_logging(settings: Dict[str, Any]) -> None:
     Parameters
     ----------
     settings:
+        Mapping loaded from configuration. Expected keys: ``level`` (str), ``json``/``json_enabled`` (bool),
+        and ``log_file`` (optional str).
         Mapping loaded from configuration. Expected keys: ``level`` (str), ``json`` (bool), and
         ``log_file`` (optional str).
     """
@@ -24,6 +26,9 @@ def configure_logging(settings: Dict[str, Any]) -> None:
     level = getattr(logging, level_name, logging.INFO)
     handlers: list[logging.Handler] = []
 
+    json_flag = settings.get("json_enabled", settings.get("json", True))
+
+    if json_flag:
     if settings.get("json", True):
         renderer = structlog.processors.JSONRenderer()
     else:

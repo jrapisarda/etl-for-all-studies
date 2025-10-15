@@ -32,6 +32,11 @@ def hash_file(path: Path, chunk_size: int = 8192) -> str:
 def ensure_required_files(study_dir: Path, required: Iterable[str] | None = None) -> None:
     """Validate that the ``study_dir`` contains the expected TSV files."""
 
+    required_files = {name.lower() for name in (required or REQUIRED_TSVS)}
+    present = {p.name.lower() for p in study_dir.iterdir() if p.is_file()}
+    missing = required_files - present
+    if missing:
+        missing_list = ", ".join(sorted(required or REQUIRED_TSVS))
     required_files = set(required or REQUIRED_TSVS)
     present = {p.name for p in study_dir.iterdir() if p.is_file()}
     missing = required_files - present

@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, validator
+
+
+class LoggingConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    level: str = Field(default="info")
+    json_enabled: bool = Field(default=True, alias="json")
 from pydantic import BaseModel, Field, validator
 
 
