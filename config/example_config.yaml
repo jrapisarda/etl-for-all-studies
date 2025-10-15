@@ -1,0 +1,33 @@
+# Example configuration for the genomic ETL pipeline
+
+database:
+  connection_string: "sqlite:///./example.db"
+  batch_size: 1000
+  connection_timeout: 30
+  max_retries: 3
+  retry_backoff_seconds: 5
+
+processing:
+  input_directory: "./data/studies"
+  gene_filter_file: "./config/filter_genes.tsv"
+  max_concurrent_studies: 2
+  state_directory: "./state"
+
+logging:
+  log_level: "INFO"
+  log_directory: "./logs"
+  log_processing_time: true
+  log_record_counts: true
+  log_data_quality: true
+
+field_mappings:
+  age_fields:
+    - refinebio_age
+    - characteristics_ch1_Age
+  sex_fields:
+    - refinebio_sex
+    - characteristics_ch1_Sex
+  illness_fields:
+    - characteristics_ch1_Illness
+  platform_fields:
+    - refinebio_platform

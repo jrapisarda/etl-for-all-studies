@@ -1,2 +1,4 @@
 .venv/
 studies/
+__pycache__/
+*.pyc
