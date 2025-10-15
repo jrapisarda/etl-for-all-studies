@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator
 
 # Disable OpenAI tracing and other external services
 os.environ["OPENAI_AGENTS_TRACING"] = "false"
@@ -218,6 +218,306 @@ class ValidationResult(BaseModel):
     pytest_stdout: str = ""
     pytest_stderr: str = ""
 
+
+def _ensure_str_list(value: Any) -> List[str]:
+    """Normalize arbitrary input into a list of strings."""
+
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, tuple):
+        items = list(value)
+    elif isinstance(value, set):
+        items = list(value)
+    elif isinstance(value, dict):
+        items = list(value.values())
+    elif isinstance(value, bytes):
+        try:
+            return [value.decode("utf-8")]
+        except UnicodeDecodeError:
+            return [value.decode("utf-8", errors="replace")]
+    elif isinstance(value, str):
+        return [value]
+    elif isinstance(value, Iterable):
+        items = list(value)
+    else:
+        return [str(value)]
+
+    normalized: List[str] = []
+    for item in items:
+        if isinstance(item, bytes):
+            try:
+                normalized.append(item.decode("utf-8"))
+            except UnicodeDecodeError:
+                normalized.append(item.decode("utf-8", errors="replace"))
+        else:
+            normalized.append(str(item))
+    return normalized
+
+
+class RequirementsBaseModel(BaseModel):
+    """Base model that allows unknown fields for forward-compatible parsing."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ProjectInfo(RequirementsBaseModel):
+    name: str
+    version: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    complexity: Optional[str] = None
+
+
+class ArchitectureSpec(RequirementsBaseModel):
+    pattern: Optional[str] = None
+    components: List[str] = Field(default_factory=list)
+    deployment: Optional[str] = None
+    communication: Optional[str] = None
+
+    @field_validator("components", mode="before")
+    @classmethod
+    def _normalize_components(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class TechnicalRequirements(RequirementsBaseModel):
+    core_platform: List[str] = Field(default_factory=list)
+    development_tools: List[str] = Field(default_factory=list)
+    execution_environment: List[str] = Field(default_factory=list)
+
+    @field_validator("core_platform", "development_tools", "execution_environment", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class AgentCapability(RequirementsBaseModel):
+    input: List[str] = Field(default_factory=list)
+    output: List[str] = Field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    validation: List[str] = Field(default_factory=list)
+
+    @field_validator("input", "output", "tools", "validation", mode="before")
+    @classmethod
+    def _normalize_agent_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class FunctionalRequirements(RequirementsBaseModel):
+    core_features: List[str] = Field(default_factory=list)
+    cli_operations: List[str] = Field(default_factory=list)
+    agent_capabilities: Dict[str, AgentCapability] = Field(default_factory=dict)
+
+    @field_validator("core_features", "cli_operations", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class NonFunctionalRequirements(RequirementsBaseModel):
+    performance: List[str] = Field(default_factory=list)
+    reliability: List[str] = Field(default_factory=list)
+    security: List[str] = Field(default_factory=list)
+    usability: List[str] = Field(default_factory=list)
+
+    @field_validator("performance", "reliability", "security", "usability", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class Specifications(RequirementsBaseModel):
+    architecture: Optional[ArchitectureSpec] = None
+    technical_requirements: Optional[TechnicalRequirements] = None
+    functional_requirements: Optional[FunctionalRequirements] = None
+    non_functional_requirements: Optional[NonFunctionalRequirements] = None
+
+
+class DevelopmentPhase(RequirementsBaseModel):
+    name: str
+    duration: Optional[str] = None
+    components: List[str] = Field(default_factory=list)
+
+    @field_validator("components", mode="before")
+    @classmethod
+    def _normalize_components(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class DevelopmentPlan(RequirementsBaseModel):
+    phases: List[DevelopmentPhase] = Field(default_factory=list)
+    milestones: List[str] = Field(default_factory=list)
+
+    @field_validator("phases", mode="before")
+    @classmethod
+    def _normalize_phases(cls, value: Any) -> List[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    @field_validator("milestones", mode="before")
+    @classmethod
+    def _normalize_milestones(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class FileStructure(RequirementsBaseModel):
+    directories: List[str] = Field(default_factory=list)
+    files: Dict[str, List[str]] = Field(default_factory=dict)
+
+    @field_validator("directories", mode="before")
+    @classmethod
+    def _normalize_directories(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+    @field_validator("files", mode="before")
+    @classmethod
+    def _normalize_files(cls, value: Any) -> Dict[str, List[str]]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise TypeError("files must be a mapping of directory -> file list")
+        normalized: Dict[str, List[str]] = {}
+        for key, items in value.items():
+            normalized[str(key)] = _ensure_str_list(items)
+        return normalized
+
+
+class Dependencies(RequirementsBaseModel):
+    core: List[str] = Field(default_factory=list)
+    execution: List[str] = Field(default_factory=list)
+    utils: List[str] = Field(default_factory=list)
+    dev: List[str] = Field(default_factory=list)
+
+    @field_validator("core", "execution", "utils", "dev", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class APISettings(RequirementsBaseModel):
+    openai_api_key: Optional[str] = None
+    model: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+
+
+class ExecutionLimits(RequirementsBaseModel):
+    max_execution_time: Optional[int] = None
+    max_memory_mb: Optional[int] = None
+    network_access: Optional[bool] = None
+    max_file_size_mb: Optional[int] = None
+
+
+class RateLimiting(RequirementsBaseModel):
+    requests_per_minute: Optional[int] = None
+    retry_attempts: Optional[int] = None
+    backoff_factor: Optional[float] = None
+
+
+class Snapshots(RequirementsBaseModel):
+    auto_snapshot: Optional[bool] = None
+    max_snapshots: Optional[int] = None
+    retention_days: Optional[int] = None
+
+
+class Configuration(RequirementsBaseModel):
+    api_settings: Optional[APISettings] = None
+    execution_limits: Optional[ExecutionLimits] = None
+    rate_limiting: Optional[RateLimiting] = None
+    snapshots: Optional[Snapshots] = None
+
+
+class ExecutionWorkflow(RequirementsBaseModel):
+    setup: List[str] = Field(default_factory=list)
+    main_execution: List[str] = Field(default_factory=list)
+    error_handling: List[str] = Field(default_factory=list)
+
+    @field_validator("setup", "main_execution", "error_handling", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class TestingStrategy(RequirementsBaseModel):
+    unit_tests: List[str] = Field(default_factory=list)
+    integration_tests: List[str] = Field(default_factory=list)
+    acceptance_tests: List[str] = Field(default_factory=list)
+
+    @field_validator("unit_tests", "integration_tests", "acceptance_tests", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class CodeQuality(RequirementsBaseModel):
+    type_checking: Optional[str] = None
+    formatting: Optional[str] = None
+    linting: Optional[str] = None
+    coverage_target: Optional[str] = None
+
+
+class Monitoring(RequirementsBaseModel):
+    structured_logging: Optional[str] = None
+    performance_metrics: Optional[str] = None
+    error_tracking: Optional[str] = None
+    audit_trail: Optional[str] = None
+
+
+class QualityAssurance(RequirementsBaseModel):
+    testing_strategy: Optional[TestingStrategy] = None
+    code_quality: Optional[CodeQuality] = None
+    monitoring: Optional[Monitoring] = None
+
+
+class AgentSpecifications(RequirementsBaseModel):
+    requirements_analysis_agent: Optional[AgentCapability] = None
+    coding_agent: Optional[AgentCapability] = None
+    testing_agent: Optional[AgentCapability] = None
+    documentation_agent: Optional[AgentCapability] = None
+
+
+class FinalPackage(RequirementsBaseModel):
+    required_files: List[str] = Field(default_factory=list)
+    metadata_includes: List[str] = Field(default_factory=list)
+    packaging_format: Optional[str] = None
+
+    @field_validator("required_files", "metadata_includes", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> List[str]:
+        return _ensure_str_list(value)
+
+
+class Deliverables(RequirementsBaseModel):
+    final_package: Optional[FinalPackage] = None
+
+
+class RequirementsDocument(RequirementsBaseModel):
+    project: Optional[ProjectInfo] = None
+    specifications: Optional[Specifications] = None
+    development_plan: Optional[DevelopmentPlan] = None
+    file_structure: Optional[FileStructure] = None
+    dependencies: Optional[Dependencies] = None
+    configuration: Optional[Configuration] = None
+    execution_workflow: Optional[ExecutionWorkflow] = None
+    quality_assurance: Optional[QualityAssurance] = None
+    agent_specifications: Optional[AgentSpecifications] = None
+    deliverables: Optional[Deliverables] = None
+
+
+def normalize_requirements_data(raw: Any) -> Dict[str, Any]:
+    """Validate and normalize requirements payloads into plain Python structures."""
+
+    try:
+        document = RequirementsDocument.model_validate(raw)
+    except ValidationError as exc:  # pragma: no cover - defensive guard
+        raise ValueError(f"Invalid requirements payload: {exc}") from exc
+    return document.model_dump(mode="python")
+
 def build_file_map(files: dict[str, str]) -> FileMap:
     """Convert plain dict into the FileMap schema the SDK requires."""
     return FileMap(files=[FileItem(path=k, content=v) for k, v in files.items()])
@@ -310,8 +610,9 @@ def read_requirements_impl(requirements_path: Optional[Path]) -> Dict[str, Any]:
     if not requirements_path.exists():
         return {"ok": False, "error": f"Requirements file not found: {requirements_path}"}
     try:
-        data = json.loads(requirements_path.read_text(encoding="utf-8"))
-        return {"ok": True, "requirements": data, "path": str(requirements_path)}
+        raw_data = json.loads(requirements_path.read_text(encoding="utf-8"))
+        normalized = normalize_requirements_data(raw_data)
+        return {"ok": True, "requirements": normalized, "path": str(requirements_path)}
     except Exception as e:
         return {"ok": False, "error": f"Failed to parse JSON: {e}", "path": str(requirements_path)}
 
@@ -840,7 +1141,8 @@ def perform_pre_run_research(
     requirements_data: Optional[Dict[str, Any]] = None
     if requirements_path and requirements_path.exists():
         try:
-            requirements_data = json.loads(requirements_path.read_text(encoding="utf-8"))
+            raw_requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
+            requirements_data = normalize_requirements_data(raw_requirements)
         except Exception as exc:
             logging.warning("Unable to parse requirements for research: %s", exc)
 
