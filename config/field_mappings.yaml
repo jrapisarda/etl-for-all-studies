@@ -1,9 +1,0 @@
-metadata:
-  study_id: STUDY_ID
-  organism: ORGANISM
-  tissue: TISSUE
-  condition: CONDITION
-  sequencing_platform: PLATFORM
-  investigator: INVESTIGATOR
-  run_date: RUN_DATE
-  notes: NOTES
