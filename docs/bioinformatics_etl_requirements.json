@@ -1,0 +1,450 @@
+{
+  "project": {
+    "name": "bioinformatics-etl-cli",
+    "version": "1.0.0",
+    "description": "Local-first, CLI ETL for genomic TSV studies to SQL Server star schema with checkpointing and rollback",
+    "type": "etl-cli",
+    "complexity": "advanced"
+  },
+  "specifications": {
+    "architecture": {
+      "pattern": "etl-pipeline",
+      "components": [
+        "study-discovery",
+        "metadata-transform",
+        "gene-filtering",
+        "batch-loader",
+        "checkpointing",
+        "rollback-manager",
+        "json-logging",
+        "config-manager"
+      ],
+      "deployment": "local-workstation",
+      "communication": "in-process"
+    },
+    "technical_requirements": {
+      "core_platform": [
+        "Python 3.13.x",
+        "Polars 1.34.0",
+        "SQLAlchemy 2.0.44",
+        "pyodbc 5.2.0",
+        "Pydantic 2.12",
+        "structlog 25.4.0",
+        "tenacity 9.1.2",
+        "SQLite 3.x"
+      ],
+      "development_tools": [
+        "uv",
+        "pytest 8.4.2+",
+        "python-dotenv 1.1.x",
+        "Typer 0.19.x"
+      ],
+      "execution_environment": [
+        "Local filesystem access",
+        "SQL Server via ODBC Driver 17+",
+        "SQLite artifacts.db",
+        "Configurable concurrency",
+        "Batch transactions",
+        "Network reconnects"
+      ]
+    },
+    "functional_requirements": {
+      "core_features": [
+        "Scan root directory for studies with required TSVs",
+        "Concurrent multi-study processing with limits",
+        "Filter expression by Ensembl IDs during ingestion",
+        "Standardize metadata to dims with UNKNOWN for missing",
+        "Idempotent upserts and conflict skipping",
+        "Batching per table with transactional commits",
+        "Resume from last successful batch with checkpoints",
+        "Externalized configuration (YAML)",
+        "Structured JSON logging and metrics",
+        "Local-first mode with SQLite artifacts",
+        "Operational snapshots and rollback by run_id",
+        "Aligned migrations for SQL Server and SQLite"
+      ],
+      "cli_operations": [
+        "etl run --config ./config.yaml",
+        "etl resume --run-id <RUN_ID>",
+        "etl rollback --run-id <RUN_ID>",
+        "etl validate --input-dir <PATH>",
+        "etl report --run-id <RUN_ID>"
+      ],
+      "agent_capabilities": {
+        "requirements_analysis": [
+          "Parse YAML config",
+          "Discover studies",
+          "Preflight file/encoding checks",
+          "Load gene filter"
+        ],
+        "coding_agent": [
+          "Polars streaming TSV ingest",
+          "Metadata mapping/coalesce",
+          "ODBC fast_executemany bulk inserts",
+          "Upsert/merge patterns",
+          "Checkpoint persistence"
+        ],
+        "testing_agent": [
+          "Sample study fixtures",
+          "Preflight validators",
+          "Throughput and DQ assertions"
+        ],
+        "documentation_agent": [
+          "README with CLI usage",
+          "Migration DDLs",
+          "Run summaries export"
+        ]
+      }
+    },
+    "non_functional_requirements": {
+      "performance": [
+        "50% faster multi-study throughput target",
+        "Streaming to bound memory",
+        "Batch size configurable (default 1000)"
+      ],
+      "reliability": [
+        "Idempotent loads via unique constraints",
+        "Retry with exponential backoff",
+        "Resume from checkpoints",
+        "95%+ successful runs"
+      ],
+      "security": [
+        "Least-privileged DB credentials",
+        "No per-gene skip logs",
+        "Secrets via environment variables"
+      ],
+      "usability": [
+        "Clear CLI with progress",
+        "Actionable error messages",
+        "Comprehensive JSON logs"
+      ]
+    }
+  },
+  "development_plan": {
+    "phases": [
+      {
+        "name": "Core Scaffolding",
+        "duration": "2 weeks",
+        "components": [
+          "Project structure",
+          "Config models (Pydantic)",
+          "Logging setup (structlog)",
+          "Artifacts SQLite"
+        ]
+      },
+      {
+        "name": "Ingestion & Transform",
+        "duration": "3 weeks",
+        "components": [
+          "Study discovery",
+          "Polars streaming parsers",
+          "Metadata normalization",
+          "Gene filter application"
+        ]
+      },
+      {
+        "name": "Load & Resilience",
+        "duration": "3 weeks",
+        "components": [
+          "SQLAlchemy models/DDL",
+          "pyodbc fast_executemany",
+          "Idempotent upserts",
+          "Checkpointing & resume",
+          "Rollback command"
+        ]
+      },
+      {
+        "name": "Validation & Packaging",
+        "duration": "2 weeks",
+        "components": [
+          "Preflight validators",
+          "Test fixtures & pytest",
+          "Docs and CLI help",
+          "Migrations for SQL Server/SQLite"
+        ]
+      }
+    ],
+    "milestones": [
+      "Week 2: CLI runs with config and logging",
+      "Week 5: End-to-end single study",
+      "Week 8: Resume/rollback operational",
+      "Week 10: Multi-study performance target"
+    ]
+  },
+  "file_structure": {
+    "directories": [
+      "src/etl/",
+      "src/db/",
+      "src/cli/",
+      "src/utils/",
+      "migrations/",
+      "config/",
+      "logs/",
+      "artifacts/",
+      "tests/",
+      "dist/"
+    ],
+    "files": {
+      "src/etl/": [
+        "discovery.py",
+        "transform.py",
+        "loader.py",
+        "checkpoint.py",
+        "rollback.py"
+      ],
+      "src/db/": [
+        "engine.py",
+        "models.py",
+        "mssql.py",
+        "sqlite.py"
+      ],
+      "src/cli/": [
+        "main.py",
+        "commands.py",
+        "validators.py"
+      ],
+      "src/utils/": [
+        "logging_setup.py",
+        "file_utils.py",
+        "metrics.py"
+      ],
+      "migrations/": [
+        "mssql.sql",
+        "sqlite.sql"
+      ],
+      "config/": [
+        "config.example.yaml",
+        "field_mappings.example.yaml"
+      ],
+      "logs/": [
+        ".gitkeep"
+      ],
+      "artifacts/": [
+        ".gitkeep"
+      ],
+      "tests/": [
+        "test_discovery.py",
+        "test_transform.py",
+        "test_loader.py",
+        "test_resume.py"
+      ],
+      "": []
+    }
+  },
+  "dependencies": {
+    "core": [
+      "polars>=1.34.0",
+      "SQLAlchemy>=2.0.44",
+      "pyodbc>=5.2.0",
+      "pydantic>=2.12.0",
+      "structlog>=25.4.0",
+      "tenacity>=9.1.2",
+      "typer>=0.19.2",
+      "pyyaml>=6.0.0"
+    ],
+    "execution": [
+      "uv>=0.1.0",
+      "pytest>=8.4.2",
+      "pytest-cov>=4.0.0",
+      "virtualenv>=20.0.0"
+    ],
+    "utils": [
+      "python-dotenv>=1.1.1",
+      "checksumdir>=1.2.0",
+      "rich>=13.0.0",
+      "requests>=2.28.0",
+      "toml>=0.10.0"
+    ],
+    "dev": [
+      "black>=23.0.0",
+      "ruff>=0.1.0",
+      "mypy>=1.0.0",
+      "pytest-asyncio>=0.21.0"
+    ]
+  },
+  "configuration": {
+    "api_settings": {
+      "openai_api_key": "env:OPENAI_API_KEY",
+      "model": "gpt-5",
+      "max_tokens": 4000,
+      "temperature": 0.1
+    },
+    "execution_limits": {
+      "max_execution_time": 7200,
+      "max_memory_mb": 4096,
+      "network_access": true,
+      "max_file_size_mb": 2048
+    },
+    "rate_limiting": {
+      "requests_per_minute": 60,
+      "retry_attempts": 5,
+      "backoff_factor": 2
+    },
+    "snapshots": {
+      "auto_snapshot": true,
+      "max_snapshots": 50,
+      "retention_days": 60
+    }
+  },
+  "execution_workflow": {
+    "setup": [
+      "Initialize artifacts.db with runs,batches,checkpoints,metrics",
+      "Load YAML config and field mappings",
+      "Validate SQL Server/SQLite connectivity",
+      "Load gene filter into set/Series"
+    ],
+    "main_execution": [
+      "Discover studies and enqueue",
+      "Process up to max_concurrent_studies",
+      "Read metadata TSV (Polars) and normalize",
+      "Upsert dims with unique constraints",
+      "Stream expression TSV and filter by Ensembl",
+      "Batch insert fact_expression",
+      "Commit each batch and record checkpoints",
+      "Write per-study metrics and export summaries"
+    ],
+    "error_handling": [
+      "Retry DB ops with tenacity (exponential backoff+jitter)",
+      "On reconnect, resume from last committed batch",
+      "Rollback by run_id across fact then dims",
+      "Fail fast on invalid formats with clear errors"
+    ]
+  },
+  "quality_assurance": {
+    "testing_strategy": {
+      "unit_tests": [
+        "Discovery logic",
+        "Transform rules and UNKNOWN coalesce",
+        "Upsert and constraint handling",
+        "Checkpoint state machine"
+      ],
+      "integration_tests": [
+        "End-to-end with sample TSVs",
+        "SQL Server bulk insert path",
+        "Resume after simulated failure",
+        "Rollback by run_id"
+      ],
+      "acceptance_tests": [
+        "Process 5 studies concurrently",
+        "Throughput target scenario",
+        "Data quality summary generation"
+      ]
+    },
+    "code_quality": {
+      "type_checking": "mypy with strict",
+      "formatting": "black line-length 100",
+      "linting": "ruff all rules",
+      "coverage_target": "80% minimum"
+    },
+    "monitoring": {
+      "structured_logging": "JSON logs with run_id and study tags",
+      "performance_metrics": "Records/sec, memory, batch latencies",
+      "error_tracking": "Categorized errors with context",
+      "audit_trail": "Complete run history in SQLite"
+    }
+  },
+  "agent_specifications": {
+    "requirements_analysis_agent": {
+      "input": [
+        "yaml_config",
+        "directory_tree",
+        "tsv_headers"
+      ],
+      "output": "discovery_plan",
+      "tools": [
+        "config_loader",
+        "study_discoverer",
+        "preflight_validator"
+      ],
+      "validation": [
+        "required_columns_check",
+        "encoding_and_delimiter_check"
+      ]
+    },
+    "coding_agent": {
+      "input": "discovery_plan",
+      "output": [
+        "etl_pipeline",
+        "ddl_migrations",
+        "cli_commands"
+      ],
+      "tools": [
+        "polars_streamer",
+        "transform_mapper",
+        "db_bulk_loader",
+        "checkpoint_store"
+      ],
+      "validation": [
+        "schema_alignment",
+        "idempotency_checks",
+        "smoke_run_single_study"
+      ]
+    },
+    "testing_agent": {
+      "input": [
+        "etl_pipeline",
+        "sample_data"
+      ],
+      "output": [
+        "pytest_suites",
+        "test_results",
+        "coverage_report"
+      ],
+      "tools": [
+        "test_generator",
+        "fixture_builder",
+        "test_runner"
+      ],
+      "validation": [
+        "pass_rate_threshold",
+        "coverage_metrics",
+        "result_consistency"
+      ]
+    },
+    "documentation_agent": {
+      "input": [
+        "cli",
+        "migrations",
+        "run_metrics"
+      ],
+      "output": [
+        "README.md",
+        "usage_examples",
+        "migration_notes"
+      ],
+      "tools": [
+        "documentation_generator",
+        "manifest_creator",
+        "checksum_calculator"
+      ],
+      "validation": [
+        "completeness",
+        "accuracy",
+        "package_integrity"
+      ]
+    }
+  },
+  "deliverables": {
+    "final_package": {
+      "required_files": [
+        "src/ (ETL source)",
+        "migrations/ (DDL)",
+        "config/ (examples)",
+        "tests/ (pytest)",
+        "README.md",
+        "artifacts.db (sample)",
+        "logs/",
+        "manifest.json"
+      ],
+      "metadata_includes": [
+        "python_version",
+        "package_versions",
+        "execution_timestamps",
+        "throughput_metrics",
+        "dq_summary",
+        "run_id"
+      ],
+      "packaging_format": "ZIP"
+    }
+  }
+}
