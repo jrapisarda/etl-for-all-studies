@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
@@ -41,13 +42,63 @@ class MetadataFormatError(RuntimeError):
     """Raised when metadata files are missing required columns."""
 
 
+def _normalize_header(name: str | None) -> str:
+    """Return a case-insensitive representation with sequential digits stripped.
+
+    Many refine.bio metadata files expose repeated characteristic columns whose
+    names only differ by the numeric component (for example
+    ``characteristics_ch1_Illness`` vs ``characteristics_ch2_illness``).  The
+    ETL configuration typically lists a single canonical header.  By removing
+    the numeric fragments we can treat these variants as the same logical
+    column, while still preferring exact matches when they exist.
+    """
+
+    if not name:
+        return ""
+    return re.sub(r"\d+", "", name).strip().casefold()
+
+
 def _first_non_empty(row: dict[str, str], candidates: Sequence[str]) -> str:
+    if not row:
+        return UNKNOWN_VALUE
+
+    # Pre-compute lookups so we can resolve dynamic header variations quickly.
+    casefold_lookup: dict[str, str] = {}
+    normalized_lookup: dict[str, list[str]] = {}
+    for header, raw_value in row.items():
+        if header is None:
+            continue
+        if raw_value is not None and raw_value.strip():
+            casefold_lookup.setdefault(header.casefold(), raw_value)
+            normalized_key = _normalize_header(header)
+            normalized_lookup.setdefault(normalized_key, []).append(raw_value)
+
     for candidate in candidates:
+        if not candidate:
+            continue
+
+        # 1. Exact header match.
         value = row.get(candidate)
-        if value is not None:
-            value = value.strip()
-            if value:
-                return value
+        if value is None:
+            value = row.get(candidate.strip())
+
+        # 2. Case-insensitive match.
+        if value is None:
+            value = casefold_lookup.get(candidate.casefold())
+
+        # 3. Header variants that only differ by numeric suffix/prefix.
+        if value is None:
+            matches = normalized_lookup.get(_normalize_header(candidate), [])
+            if matches:
+                value = matches[0]
+
+        if value is None:
+            continue
+
+        value = value.strip()
+        if value:
+            return value
+
     return UNKNOWN_VALUE
 
 
