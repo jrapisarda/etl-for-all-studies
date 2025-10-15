@@ -12,15 +12,18 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Generic, Iterable, List, Optional, Tuple, TypeVar
 
-from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator
+import yaml
+from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator, model_validator
 
 # Disable OpenAI tracing and other external services
 os.environ["OPENAI_AGENTS_TRACING"] = "false"
 os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "true"
 
 # ---- OpenAI Agents SDK (configured for Kimi / Moonshot) ------------------
+_AGENTS_IMPORT_ERROR: Exception | None = None
+
 try:
     from agents import (
         Agent,
@@ -34,11 +37,58 @@ try:
     )
     from agents.run_context import RunContextWrapper
     from openai import AsyncOpenAI
-except Exception as e:
-    raise RuntimeError(
-        "The OpenAI Agents SDK and openai client are required. "
-        "Install with: pip install openai-agents openai"
-    ) from e
+except Exception as e:  # pragma: no cover - fallback when SDK missing
+    _AGENTS_IMPORT_ERROR = e
+
+    def _missing_agents_error() -> RuntimeError:
+        return RuntimeError(
+            "The OpenAI Agents SDK and openai client are required. "
+            "Install with: pip install openai-agents openai"
+        )
+
+    def function_tool(*args: Any, **kwargs: Any):  # type: ignore
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def enable_verbose_stdout_logging(*args: Any, **kwargs: Any) -> None:
+        raise _missing_agents_error() from e
+
+    def set_default_openai_client(*args: Any, **kwargs: Any) -> None:
+        raise _missing_agents_error() from e
+
+    def set_default_openai_api(*args: Any, **kwargs: Any) -> None:
+        raise _missing_agents_error() from e
+
+    class ModelSettings:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise _missing_agents_error() from e
+
+    class CodeInterpreterTool:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise _missing_agents_error() from e
+
+    TAgent = TypeVar("TAgent")
+
+    class Agent(Generic[TAgent]):  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise _missing_agents_error() from e
+
+    class Runner:  # type: ignore
+        @staticmethod
+        def run_sync(*args: Any, **kwargs: Any) -> Any:
+            raise _missing_agents_error() from e
+
+    TContext = TypeVar("TContext")
+
+    class RunContextWrapper(Generic[TContext]):  # type: ignore
+        def __init__(self, context: TContext) -> None:
+            self.context = context
+
+    class AsyncOpenAI:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise _missing_agents_error() from e
 
 
 # ----------------------------------------------------------------------------
@@ -298,8 +348,26 @@ class AgentCapability(RequirementsBaseModel):
     output: List[str] = Field(default_factory=list)
     tools: List[str] = Field(default_factory=list)
     validation: List[str] = Field(default_factory=list)
+    summary: List[str] = Field(default_factory=list)
 
-    @field_validator("input", "output", "tools", "validation", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_generic_payload(cls, value: Any) -> Dict[str, Any] | Any:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, (list, tuple, set)):
+            return {"summary": _ensure_str_list(value)}
+        if isinstance(value, bytes):
+            try:
+                decoded = value.decode("utf-8")
+            except UnicodeDecodeError:
+                decoded = value.decode("utf-8", errors="replace")
+            return {"summary": [decoded]}
+        return {"summary": [str(value)]}
+
+    @field_validator("input", "output", "tools", "validation", "summary", mode="before")
     @classmethod
     def _normalize_agent_lists(cls, value: Any) -> List[str]:
         return _ensure_str_list(value)
@@ -314,6 +382,27 @@ class FunctionalRequirements(RequirementsBaseModel):
     @classmethod
     def _normalize_lists(cls, value: Any) -> List[str]:
         return _ensure_str_list(value)
+
+    @field_validator("agent_capabilities", mode="before")
+    @classmethod
+    def _normalize_agent_capabilities(cls, value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            normalized: Dict[str, Any] = {}
+            for key, capability in value.items():
+                normalized[str(key)] = capability
+            return normalized
+        if isinstance(value, (list, tuple, set)):
+            return {f"capability_{idx+1}": item for idx, item in enumerate(value)}
+        if isinstance(value, (str, bytes)):
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode("utf-8")
+                except UnicodeDecodeError:
+                    value = value.decode("utf-8", errors="replace")
+            return {"default": value}
+        return {"default": value}
 
 
 class NonFunctionalRequirements(RequirementsBaseModel):
@@ -512,11 +601,50 @@ class RequirementsDocument(RequirementsBaseModel):
 def normalize_requirements_data(raw: Any) -> Dict[str, Any]:
     """Validate and normalize requirements payloads into plain Python structures."""
 
+    parsed = _maybe_parse_structured_text(raw)
+
     try:
-        document = RequirementsDocument.model_validate(raw)
-    except ValidationError as exc:  # pragma: no cover - defensive guard
-        raise ValueError(f"Invalid requirements payload: {exc}") from exc
-    return document.model_dump(mode="python")
+        document = RequirementsDocument.model_validate(parsed)
+        return document.model_dump(mode="python")
+    except ValidationError:
+        inferred = _coerce_generic_structure(parsed)
+        if isinstance(inferred, dict):
+            return inferred
+        return {"raw_payload": inferred}
+
+
+def _maybe_parse_structured_text(raw: Any) -> Any:
+    """Parse JSON or YAML strings while leaving structured objects untouched."""
+
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            try:
+                return yaml.safe_load(text)
+            except Exception:
+                return raw
+    return raw
+
+
+def _coerce_generic_structure(value: Any) -> Any:
+    """Best-effort conversion of arbitrary JSON/YAML data into safe Python types."""
+
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return {str(key): _coerce_generic_structure(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_coerce_generic_structure(item) for item in value]
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.decode("utf-8", errors="replace")
+    return value
 
 def build_file_map(files: dict[str, str]) -> FileMap:
     """Convert plain dict into the FileMap schema the SDK requires."""
@@ -610,11 +738,12 @@ def read_requirements_impl(requirements_path: Optional[Path]) -> Dict[str, Any]:
     if not requirements_path.exists():
         return {"ok": False, "error": f"Requirements file not found: {requirements_path}"}
     try:
-        raw_data = json.loads(requirements_path.read_text(encoding="utf-8"))
+        text = requirements_path.read_text(encoding="utf-8")
+        raw_data = _maybe_parse_structured_text(text)
         normalized = normalize_requirements_data(raw_data)
         return {"ok": True, "requirements": normalized, "path": str(requirements_path)}
     except Exception as e:
-        return {"ok": False, "error": f"Failed to parse JSON: {e}", "path": str(requirements_path)}
+        return {"ok": False, "error": f"Failed to parse requirements: {e}", "path": str(requirements_path)}
 
 
 def write_many_impl(base_dir: Path, files: FileMap, overwrite: bool = True, dry_run: bool = False) -> Dict[str, Any]:
