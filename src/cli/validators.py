@@ -14,6 +14,12 @@ class LoggingConfig(BaseModel):
 
     level: str = Field(default="info")
     json_enabled: bool = Field(default=True, alias="json")
+from pydantic import BaseModel, Field, validator
+
+
+class LoggingConfig(BaseModel):
+    level: str = Field(default="info")
+    json: bool = Field(default=True)
     log_file: str | None = None
 
 
