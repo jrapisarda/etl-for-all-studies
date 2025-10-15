@@ -44,21 +44,52 @@ class StudyProcessingError(RuntimeError):
 
 
 def discover_study_files(study_dir: pathlib.Path) -> StudyFiles:
-    metadata_candidates = list(study_dir.glob("metadata_*.tsv"))
-    expression_candidates = list(study_dir.glob("expression_*.tsv"))
-    if not metadata_candidates or not expression_candidates:
+    metadata_candidates = sorted(study_dir.glob("metadata_*.tsv"))
+    if not metadata_candidates:
         raise StudyProcessingError(
             f"Study directory {study_dir} missing metadata or expression TSV files"
         )
-    metadata_file = metadata_candidates[0]
-    expression_file = expression_candidates[0]
 
+    metadata_file = metadata_candidates[0]
     study_accession = metadata_file.stem.replace("metadata_", "")
     if not study_accession:
         raise StudyProcessingError(
             f"Unable to derive study accession from metadata file {metadata_file}"
         )
-    return StudyFiles(study_accession=study_accession, metadata_file=metadata_file, expression_file=expression_file)
+
+    expression_candidates: list[pathlib.Path] = []
+
+    # Prefer conventional naming that includes the "expression_" prefix.
+    preferred_patterns = [f"expression_{study_accession}.tsv", "expression_*.tsv"]
+    for pattern in preferred_patterns:
+        matches = sorted(study_dir.glob(pattern))
+        # Filter out the metadata file in case the glob pattern is too broad.
+        matches = [match for match in matches if match != metadata_file]
+        if matches:
+            expression_candidates.extend(matches)
+            break
+
+    if not expression_candidates:
+        # Fall back to any TSV file whose stem includes the study accession.
+        fallback_matches = sorted(
+            match
+            for match in study_dir.glob("*.tsv")
+            if match != metadata_file and study_accession in match.stem
+        )
+        expression_candidates.extend(fallback_matches)
+
+    if not expression_candidates:
+        raise StudyProcessingError(
+            f"Study directory {study_dir} missing metadata or expression TSV files"
+        )
+
+    expression_file = expression_candidates[0]
+
+    return StudyFiles(
+        study_accession=study_accession,
+        metadata_file=metadata_file,
+        expression_file=expression_file,
+    )
 
 
 def _load_resume_state(session: Session, accession: str) -> tuple[bool, str | None, int]:
