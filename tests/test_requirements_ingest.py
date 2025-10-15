@@ -237,3 +237,38 @@ def test_normalize_requirements_data_accepts_scalar_lists():
     assert capabilities["output"] == ["code"]
     assert capabilities["tools"] == ["editor"]
     assert capabilities["validation"] == ["tests"]
+
+
+def test_normalize_requirements_data_best_effort_agent_capabilities_lists():
+    payload = {
+        "specifications": {
+            "functional_requirements": {
+                "agent_capabilities": {
+                    "requirements_analysis": [
+                        "Parse YAML config",
+                        "Discover studies",
+                        "Load gene filter",
+                    ]
+                }
+            }
+        }
+    }
+
+    normalized = normalize_requirements_data(payload)
+
+    capabilities = normalized["specifications"]["functional_requirements"]["agent_capabilities"][
+        "requirements_analysis"
+    ]
+    assert capabilities["summary"] == [
+        "Parse YAML config",
+        "Discover studies",
+        "Load gene filter",
+    ]
+
+
+def test_normalize_requirements_data_returns_raw_payload_for_text():
+    payload = "Plain english description of requirements"
+
+    normalized = normalize_requirements_data(payload)
+
+    assert normalized["raw_payload"] == "Plain english description of requirements"
