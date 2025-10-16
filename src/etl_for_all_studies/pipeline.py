@@ -151,17 +151,18 @@ def _process_metadata(
     if not samples:
         raise StudyProcessingError(f"No valid samples found in metadata {study_files.metadata_file}")
 
-    study_accession = samples[0].study_accession
+    study_accession = study_files.study_accession
     study_key = get_or_create_study(session, cache, study_accession)
 
     for sample in samples:
-        if sample.study_accession != study_accession:
+        if sample.study_accession not in {study_accession, UNKNOWN_VALUE}:
             LOGGER.warning(
                 "Sample %s references differing study accession %s (expected %s)",
                 sample.gsm_accession,
                 sample.study_accession,
                 study_accession,
             )
+        sample.study_accession = study_accession
         get_or_create_sample(session, cache, sample, study_key=study_key)
 
     session.commit()
