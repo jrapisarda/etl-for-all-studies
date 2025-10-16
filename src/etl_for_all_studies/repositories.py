@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .metadata_processing import SampleMetadata
@@ -85,9 +86,17 @@ def _get_or_create_unique_dimension(
         LOGGER.debug("Loaded existing %s %s -> %s", log_label, value, key)
         return key
 
+    def _load_and_cache_key() -> int:
+        existing_row = session.execute(select(model).where(unique_column == value)).scalar_one()
+        key = getattr(existing_row, key_attribute)
+        cache[value] = key
+        return key
+
     bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else None
+
     inserted = False
-    if bind is not None and bind.dialect.name == "sqlite":
+    if dialect == "sqlite":
         stmt = (
             sqlite_insert(model)
             .values({unique_column.key: value})
@@ -95,19 +104,31 @@ def _get_or_create_unique_dimension(
         )
         result = session.execute(stmt)
         inserted = bool(result.rowcount)
-        session.flush()
-    else:
-        instance = model(**{unique_column.key: value})
-        session.add(instance)
-        session.flush()
-        key = getattr(instance, key_attribute)
-        cache[value] = key
-        LOGGER.debug("Inserted %s %s -> %s", log_label, value, key)
-        return key
+    elif dialect == "postgresql":  # pragma: no cover - optional backend
+        from sqlalchemy.dialects.postgresql import insert as postgres_insert
 
-    existing = session.execute(select(model).where(unique_column == value)).scalar_one()
-    key = getattr(existing, key_attribute)
-    cache[value] = key
+        stmt = (
+            postgres_insert(model)
+            .values({unique_column.key: value})
+            .on_conflict_do_nothing(index_elements=[unique_column.name])
+        )
+        result = session.execute(stmt)
+        inserted = bool(result.rowcount)
+    else:
+        try:
+            with session.begin_nested():
+                instance = model(**{unique_column.key: value})
+                session.add(instance)
+                session.flush()
+            inserted = True
+        except IntegrityError:
+            LOGGER.debug(
+                "Concurrent insert detected for %s %s; loading existing record",
+                log_label,
+                value,
+            )
+
+    key = _load_and_cache_key()
     if inserted:
         LOGGER.debug("Inserted %s %s -> %s", log_label, value, key)
     else:
