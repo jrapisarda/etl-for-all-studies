@@ -5,6 +5,7 @@ import concurrent.futures
 import logging
 import pathlib
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -12,20 +13,30 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import AppConfig
+from .correlation import compute_gene_pair_correlations
 from .database import create_engine_with_retries, create_session_factory
 from .expression_processing import ExpressionFormatError, iter_filtered_expression
 from .gene_filter import load_gene_filter
 from .logging_utils import configure_logging
-from .metadata_processing import MetadataFormatError, MetadataQuality, SampleMetadata, load_metadata
-from .models import Base, DimSample, EtlStudyState, FactExpression
+from .metadata_processing import (
+    MetadataFormatError,
+    MetadataQuality,
+    SampleMetadata,
+    UNKNOWN_VALUE,
+    load_metadata,
+)
+from .models import Base, EtlStudyState, FactExpression
 from .repositories import (
     DimensionCache,
     bulk_insert_expression_records,
+    bulk_insert_gene_pair_correlations,
     bootstrap_cache,
     clear_state,
+    delete_gene_pair_correlations_for_study,
     get_or_create_gene,
     get_or_create_sample,
     get_or_create_study,
+    get_or_create_illness,
     upsert_state,
 )
 
@@ -181,6 +192,16 @@ def _process_expression(
     total_records = 0
     total_genes = set()
 
+    gene_expression_by_sample: dict[int, dict[str, float]] = defaultdict(dict)
+    sample_illness_map: dict[str, int | None] = {}
+    for sample in samples:
+        illness_key = None
+        if sample.illness_label and sample.illness_label != UNKNOWN_VALUE:
+            illness_key = cache.illnesses.get(sample.illness_label)
+            if illness_key is None:
+                illness_key = get_or_create_illness(session, cache, sample.illness_label)
+        sample_illness_map[sample.gsm_accession] = illness_key
+
     last_gene = resume_gene
     last_sample = resume_sample_index
 
@@ -196,6 +217,7 @@ def _process_expression(
         gene_key = get_or_create_gene(session, cache, row.gene_id)
         sample_key = sample_key_map[row.sample_accession]
         cache.samples[(row.sample_accession, study_key)] = sample_key
+        gene_expression_by_sample[gene_key][row.sample_accession] = row.expression_value
 
         if (sample_key, gene_key) in existing_facts:
             continue
@@ -233,6 +255,16 @@ def _process_expression(
         )
         session.commit()
 
+    delete_gene_pair_correlations_for_study(session, study_key)
+    correlations = compute_gene_pair_correlations(
+        gene_expression_by_sample,
+        sample_illness_map=sample_illness_map,
+        study_key=study_key,
+    )
+    if correlations:
+        bulk_insert_gene_pair_correlations(session, correlations)
+    session.commit()
+
     if config.logging.log_record_counts:
         LOGGER.info(
             "Expression processed for study %s: %s records, %s genes",
@@ -256,32 +288,22 @@ def _process_single_study(
     start_time = time.perf_counter()
     with session_factory() as session:
         cache = bootstrap_cache(session)
-        metadata_loaded, resume_gene, resume_index = _load_resume_state(
+        _metadata_loaded, resume_gene, resume_index = _load_resume_state(
             session, study_files.study_accession
         )
 
         try:
-            if not metadata_loaded:
-                study_key, samples, quality = _process_metadata(
-                    session, cache, study_files, config=config
-                )
-                upsert_state(
-                    session,
-                    study_files.study_accession,
-                    last_gene=None,
-                    last_sample_index=0,
-                    metadata_loaded=True,
-                )
-                session.commit()
-            else:
-                samples, quality = load_metadata(
-                    study_files.metadata_file, config.field_mappings, enforce_required=True
-                )
-                study_key = cache.studies.get(samples[0].study_accession)
-                if study_key is None:
-                    study_key, _, _ = _process_metadata(
-                        session, cache, study_files, config=config
-                    )
+            study_key, samples, quality = _process_metadata(
+                session, cache, study_files, config=config
+            )
+            upsert_state(
+                session,
+                study_files.study_accession,
+                last_gene=resume_gene,
+                last_sample_index=resume_index,
+                metadata_loaded=True,
+            )
+            session.commit()
             record_count, gene_count = _process_expression(
                 session,
                 cache,

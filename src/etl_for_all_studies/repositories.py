@@ -5,7 +5,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .metadata_processing import SampleMetadata
@@ -17,6 +17,7 @@ from .models import (
     DimStudy,
     EtlStudyState,
     FactExpression,
+    FactGenePairCorrelation,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -109,7 +110,39 @@ def get_or_create_sample(
 ) -> int:
     key = (sample.gsm_accession, study_key)
     if key in cache.samples:
-        return cache.samples[key]
+        sample_key = cache.samples[key]
+        dim_sample = session.get(DimSample, sample_key)
+        if dim_sample is None:
+            cache.samples.pop(key, None)
+        else:
+            platform_key = get_or_create_platform(session, cache, sample.platform_accession)
+            illness_key = get_or_create_illness(session, cache, sample.illness_label)
+            updated = False
+            if platform_key and dim_sample.platform_key != platform_key:
+                dim_sample.platform_key = platform_key
+                updated = True
+            if illness_key and dim_sample.illness_key != illness_key:
+                dim_sample.illness_key = illness_key
+                updated = True
+            if sample.age and sample.age != UNKNOWN_VALUE and (
+                not dim_sample.age or dim_sample.age == UNKNOWN_VALUE
+            ):
+                dim_sample.age = sample.age
+                updated = True
+            if sample.sex and sample.sex != UNKNOWN_VALUE and (
+                not dim_sample.sex or dim_sample.sex == UNKNOWN_VALUE
+            ):
+                dim_sample.sex = sample.sex
+                updated = True
+            if updated:
+                LOGGER.debug(
+                    "Updated sample %s/%s metadata (platform=%s, illness=%s)",
+                    sample.gsm_accession,
+                    study_key,
+                    platform_key,
+                    illness_key,
+                )
+            return sample_key
 
     platform_key = get_or_create_platform(session, cache, sample.platform_accession)
     illness_key = get_or_create_illness(session, cache, sample.illness_label)
@@ -177,6 +210,20 @@ def bulk_insert_expression_records(
     session.add_all(records)
 
 
+def bulk_insert_gene_pair_correlations(
+    session: Session, records: Iterable[FactGenePairCorrelation]
+) -> None:
+    session.add_all(records)
+
+
+def delete_gene_pair_correlations_for_study(session: Session, study_key: int) -> None:
+    session.execute(
+        delete(FactGenePairCorrelation).where(
+            FactGenePairCorrelation.study_key == study_key
+        )
+    )
+
+
 __all__ = [
     "DimensionCache",
     "bootstrap_cache",
@@ -186,6 +233,8 @@ __all__ = [
     "get_or_create_platform",
     "get_or_create_illness",
     "bulk_insert_expression_records",
+    "bulk_insert_gene_pair_correlations",
+    "delete_gene_pair_correlations_for_study",
     "upsert_state",
     "clear_state",
 ]

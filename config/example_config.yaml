@@ -10,7 +10,7 @@ database:
 processing:
   input_directory: "D:/Archive"
   gene_filter_file: "./config/filter_genes.tsv"
-  max_concurrent_studies: 2
+  max_concurrent_studies: 6
   state_directory: "./state"
 
 logging:
