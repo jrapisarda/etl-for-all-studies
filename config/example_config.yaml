@@ -8,7 +8,7 @@ database:
   retry_backoff_seconds: 5
 
 processing:
-  input_directory: "D:/Archive"
+  input_directory: "./data/studies"
   gene_filter_file: "./config/filter_genes.tsv"
   max_concurrent_studies: 6
   state_directory: "./state"
