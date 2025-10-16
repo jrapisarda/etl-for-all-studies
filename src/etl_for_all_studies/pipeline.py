@@ -246,7 +246,8 @@ def _process_expression(
         cache.samples[(row.sample_accession, study_key)] = sample_key
         gene_expression_by_sample[gene_key][row.sample_accession] = row.expression_value
 
-        if (sample_key, gene_key) in existing_facts:
+        fact_identity = (sample_key, gene_key)
+        if fact_identity in existing_facts:
             continue
 
         fact = FactExpression(
@@ -256,6 +257,7 @@ def _process_expression(
             expression_value=row.expression_value,
         )
         batch.append(fact)
+        existing_facts.add(fact_identity)
         total_records += 1
         total_genes.add(row.gene_id)
 
@@ -373,7 +375,15 @@ def run_pipeline(config: AppConfig) -> None:
         LOGGER.warning("No studies found in %s", input_dir)
         return
 
-    max_workers = max(1, config.processing.max_concurrent_studies)
+    backend = engine.url.get_backend_name()
+    if backend == "sqlite":
+        max_workers = 1
+        LOGGER.info(
+            "SQLite backend detected; running studies sequentially to avoid database locks"
+        )
+    else:
+        max_workers = max(1, config.processing.max_concurrent_studies)
+
     LOGGER.info(
         "Processing %s studies with up to %s concurrent workers",
         len(study_dirs),
