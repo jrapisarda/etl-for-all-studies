@@ -29,5 +29,6 @@ field_mappings:
     - characteristics_ch1_Sex
   illness_fields:
     - characteristics_ch1_Illness
+    - refinebio_disease 
   platform_fields:
     - refinebio_platform
