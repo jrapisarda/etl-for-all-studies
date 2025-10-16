@@ -25,7 +25,7 @@ def test_compute_gene_pair_correlations_returns_expected_pairs() -> None:
     assert len(results) == 3
     for record in results:
         assert record.study_key == 5
-        assert record.illness_key == 10
+        assert record.illness_key is None
         assert record.n_samples == 3
         assert -1.0 <= record.rho_spearman <= 1.0
         assert 0.0 <= record.p_value <= 1.0
@@ -40,12 +40,27 @@ def test_compute_gene_pair_correlations_returns_expected_pairs() -> None:
 
 def test_compute_gene_pair_correlations_skips_insufficient_samples() -> None:
     gene_expression = {1: {"S1": 5.0}, 2: {"S1": 2.0}}
-    sample_illness = {"S1": 11}
 
     results = compute_gene_pair_correlations(
         gene_expression,
-        sample_illness_map=sample_illness,
+        sample_illness_map={},
         study_key=7,
     )
 
     assert results == []
+
+
+def test_compute_gene_pair_correlations_without_illness_metadata() -> None:
+    gene_expression = {
+        1: {"S1": 1.0, "S2": 2.0, "S3": 3.0},
+        2: {"S1": 2.0, "S2": 3.0, "S3": 4.0},
+    }
+
+    results = compute_gene_pair_correlations(
+        gene_expression,
+        sample_illness_map={},
+        study_key=12,
+    )
+
+    assert len(results) == 1
+    assert results[0].illness_key is None
