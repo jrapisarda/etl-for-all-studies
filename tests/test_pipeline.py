@@ -37,6 +37,12 @@ assert SPEC and SPEC.loader
 sys.modules[SPEC.name] = pipeline
 SPEC.loader.exec_module(pipeline)
 
+from etl_for_all_studies.config import FieldMappingConfig
+from etl_for_all_studies.models import DimSample, DimStudy
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
 
 def test_discover_study_files_accepts_accession_named_expression(tmp_path: pathlib.Path) -> None:
     study_dir = tmp_path / "GSE11907"
@@ -53,3 +59,48 @@ def test_discover_study_files_accepts_accession_named_expression(tmp_path: pathl
     assert study_files.metadata_file == metadata_file
     assert study_files.expression_file == expression_file
     assert study_files.study_accession == "GSE11907"
+
+
+def test_process_metadata_uses_directory_study_accession(tmp_path: pathlib.Path) -> None:
+    metadata_file = tmp_path / "metadata_GSE123.tsv"
+    metadata_file.write_text(
+        "refinebio_accession_code\texperiment_accession\trefinebio_age\trefinebio_sex\n"
+        "GSM_A\tGSE999\t\t\n"
+        "GSM_B\tGSE123\t45\tfemale\n",
+        encoding="utf-8",
+    )
+    expression_file = tmp_path / "expression_GSE123.tsv"
+    expression_file.write_text("gene\tGSM_A\tGSM_B\n", encoding="utf-8")
+
+    class StubLogging:
+        log_record_counts = False
+        log_data_quality = False
+
+    stub_config = types.SimpleNamespace(
+        field_mappings=FieldMappingConfig(),
+        logging=StubLogging(),
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    pipeline.Base.metadata.create_all(engine)
+    session = Session(engine)
+    cache = pipeline.DimensionCache({}, {}, {}, {}, {})
+
+    study_files = pipeline.StudyFiles(
+        study_accession="GSE123",
+        metadata_file=metadata_file,
+        expression_file=expression_file,
+    )
+
+    study_key, samples, _quality = pipeline._process_metadata(
+        session, cache, study_files, config=stub_config
+    )
+
+    study = session.execute(select(DimStudy).where(DimStudy.gse_accession == "GSE123")).scalar_one()
+    assert study.study_key == study_key
+
+    dim_samples = session.execute(select(DimSample)).scalars().all()
+    assert {sample.gsm_accession for sample in dim_samples} == {"GSM_A", "GSM_B"}
+    assert all(sample.study_key == study_key for sample in dim_samples)
+    assert set(cache.samples.keys()) == {("GSM_A", study_key), ("GSM_B", study_key)}
+    assert all(sample.study_accession == "GSE123" for sample in samples)

@@ -12,6 +12,7 @@ analytics-friendly querying.
 - Metadata normalization with configurable field mappings and UNKNOWN substitution
 - Star schema population with duplicate detection and resume support after failures
 - Configurable batch sizes, connection retries, and logging destinations
+- Automatic gene pair correlation calculation as part of the main ETL run
 
 ## Getting Started
 
@@ -27,20 +28,6 @@ pip install -r requirements.txt
 
 The example configuration uses SQLite for local development. Replace the connection
 string with your SQL Server details for production environments.
-
-### Computing Gene Pair Correlations
-
-When the dimensional tables have already been populated you can run the dedicated
-gene pair correlation ETL to populate `fact_gene_pair_corr` based on the existing
-expression data. The job includes detailed logging and performance metrics for each
-study:
-
-```bash
-./scripts/run_gene_corr_etl.py --config config/example_config.yaml
-```
-
-Use `--min-samples` to require a higher minimum number of overlapping samples for
-Spearman correlation calculations.
 
 ## Logging & Resume State
 
