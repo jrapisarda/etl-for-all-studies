@@ -52,11 +52,19 @@ def iter_filtered_expression(
             )
 
         sample_headers = header[1:]
-        missing_samples = set(sample_columns) - set(sample_headers)
+        header_set = set(sample_headers)
+        missing_samples = [sample for sample in sample_columns if sample not in header_set]
         if missing_samples:
-            raise ExpressionFormatError(
-                f"Expression file {path} missing expected sample columns: {sorted(missing_samples)}"
+            LOGGER.warning(
+                "Expression file %s missing expected sample columns: %s",
+                path,
+                sorted(missing_samples),
             )
+            sample_columns = [sample for sample in sample_columns if sample in header_set]
+            if not sample_columns:
+                raise ExpressionFormatError(
+                    f"Expression file {path} missing all expected sample columns from metadata"
+                )
 
         resume_reached = resume_gene is None
         for row in reader:
