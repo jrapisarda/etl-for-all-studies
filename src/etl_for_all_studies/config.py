@@ -25,7 +25,7 @@ class ProcessingConfig:
 
     input_directory: pathlib.Path
     gene_filter_file: pathlib.Path
-    max_concurrent_studies: int = 1
+    max_concurrent_studies: int = 6
     state_directory: pathlib.Path | None = None
 
 
@@ -154,7 +154,7 @@ def load_config(path: str | pathlib.Path, *, ensure_paths_exist: bool = True) ->
     processing = ProcessingConfig(
         input_directory=input_directory,
         gene_filter_file=gene_filter_file,
-        max_concurrent_studies=int(processing_section.get("max_concurrent_studies", 1)),
+        max_concurrent_studies=int(processing_section.get("max_concurrent_studies", 6)),
         state_directory=state_path,
     )
 

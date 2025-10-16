@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -86,6 +86,41 @@ class FactExpression(Base):
     study: Mapped[DimStudy] = relationship(back_populates="expressions")
 
 
+class FactGenePairCorrelation(Base):
+    __tablename__ = "fact_gene_pair_corr"
+    __table_args__ = (
+        UniqueConstraint(
+            "gene_a_key",
+            "gene_b_key",
+            "illness_key",
+            "study_key",
+            name="uq_gene_pair_corr",
+        ),
+        Index("ix_gene_pair_corr_gene_a", "gene_a_key"),
+        Index("ix_gene_pair_corr_gene_b", "gene_b_key"),
+        Index("ix_gene_pair_corr_illness", "illness_key"),
+        Index("ix_gene_pair_corr_study", "study_key"),
+    )
+
+    correlation_key: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    gene_a_key: Mapped[int] = mapped_column(ForeignKey("dim_gene.gene_key"), nullable=False)
+    gene_b_key: Mapped[int] = mapped_column(ForeignKey("dim_gene.gene_key"), nullable=False)
+    illness_key: Mapped[int] = mapped_column(ForeignKey("dim_illness.illness_key"), nullable=False)
+    rho_spearman: Mapped[float] = mapped_column(Float, nullable=False)
+    p_value: Mapped[float] = mapped_column(Float, nullable=False)
+    q_value: Mapped[float | None] = mapped_column(Float)
+    n_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    computed_at: Mapped[str] = mapped_column(String(50), nullable=False)
+    study_key: Mapped[int | None] = mapped_column(ForeignKey("dim_study.study_key"))
+
+    gene_a: Mapped[DimGene] = relationship(foreign_keys=[gene_a_key])
+    gene_b: Mapped[DimGene] = relationship(foreign_keys=[gene_b_key])
+    illness: Mapped[DimIllness] = relationship()
+    study: Mapped[DimStudy | None] = relationship()
+
+
 class EtlStudyState(Base):
     __tablename__ = "etl_study_state"
 
@@ -104,5 +139,6 @@ __all__ = [
     "DimIllness",
     "DimPlatform",
     "FactExpression",
+    "FactGenePairCorrelation",
     "EtlStudyState",
 ]
