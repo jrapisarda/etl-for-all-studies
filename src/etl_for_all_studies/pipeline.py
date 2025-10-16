@@ -7,7 +7,7 @@ import pathlib
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -119,6 +119,27 @@ def _load_existing_expression_keys(session: Session, study_key: int) -> set[tupl
     return {(sample_key, gene_key) for sample_key, gene_key in rows}
 
 
+def _load_existing_expression_matrix(
+    session: Session,
+    study_key: int,
+    sample_key_to_accession: Mapping[int, str],
+) -> defaultdict[int, dict[str, float]]:
+    rows = session.execute(
+        select(
+            FactExpression.gene_key,
+            FactExpression.sample_key,
+            FactExpression.expression_value,
+        ).where(FactExpression.study_key == study_key)
+    ).all()
+    matrix: defaultdict[int, dict[str, float]] = defaultdict(dict)
+    for gene_key, sample_key, expression_value in rows:
+        sample_accession = sample_key_to_accession.get(sample_key)
+        if sample_accession is None:
+            continue
+        matrix[gene_key][sample_accession] = expression_value
+    return matrix
+
+
 def _process_metadata(
     session: Session,
     cache: DimensionCache,
@@ -185,6 +206,7 @@ def _process_expression(
         sample_key_map[sample.gsm_accession] = sample_key
 
     expected_samples = set(sample_key_map.keys())
+    sample_key_to_accession = {value: key for key, value in sample_key_map.items()}
 
     existing_facts = _load_existing_expression_keys(session, study_key)
 
@@ -192,7 +214,12 @@ def _process_expression(
     total_records = 0
     total_genes = set()
 
-    gene_expression_by_sample: dict[int, dict[str, float]] = defaultdict(dict)
+    if existing_facts:
+        gene_expression_by_sample: defaultdict[int, dict[str, float]] = (
+            _load_existing_expression_matrix(session, study_key, sample_key_to_accession)
+        )
+    else:
+        gene_expression_by_sample = defaultdict(dict)
     sample_illness_map: dict[str, int | None] = {}
     for sample in samples:
         illness_key = None

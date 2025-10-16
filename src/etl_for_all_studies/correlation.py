@@ -52,7 +52,7 @@ def compute_gene_pair_correlations(
             continue
         illness_samples[int(illness_key)].append(sample_accession)
 
-    computed_at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    computed_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     correlations: list[FactGenePairCorrelation] = []
 
     for illness_key, samples in illness_samples.items():
