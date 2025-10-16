@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .metadata_processing import SampleMetadata
@@ -64,41 +65,94 @@ def get_or_create_study(session: Session, cache: DimensionCache, gse_accession: 
     return study.study_key
 
 
+def _get_or_create_unique_dimension(
+    session: Session,
+    cache: dict[str, int],
+    value: str,
+    *,
+    model: type[DimGene] | type[DimPlatform] | type[DimIllness],
+    unique_column,
+    key_attribute: str,
+    log_label: str,
+) -> int:
+    if value in cache:
+        return cache[value]
+
+    existing = session.execute(select(model).where(unique_column == value)).scalar_one_or_none()
+    if existing is not None:
+        key = getattr(existing, key_attribute)
+        cache[value] = key
+        LOGGER.debug("Loaded existing %s %s -> %s", log_label, value, key)
+        return key
+
+    bind = session.get_bind()
+    inserted = False
+    if bind is not None and bind.dialect.name == "sqlite":
+        stmt = (
+            sqlite_insert(model)
+            .values({unique_column.key: value})
+            .on_conflict_do_nothing(index_elements=[unique_column])
+        )
+        result = session.execute(stmt)
+        inserted = bool(result.rowcount)
+        session.flush()
+    else:
+        instance = model(**{unique_column.key: value})
+        session.add(instance)
+        session.flush()
+        key = getattr(instance, key_attribute)
+        cache[value] = key
+        LOGGER.debug("Inserted %s %s -> %s", log_label, value, key)
+        return key
+
+    existing = session.execute(select(model).where(unique_column == value)).scalar_one()
+    key = getattr(existing, key_attribute)
+    cache[value] = key
+    if inserted:
+        LOGGER.debug("Inserted %s %s -> %s", log_label, value, key)
+    else:
+        LOGGER.debug("Re-used existing %s %s -> %s", log_label, value, key)
+    return key
+
+
 def get_or_create_platform(session: Session, cache: DimensionCache, accession: str) -> int | None:
     if not accession or accession == UNKNOWN_VALUE:
         return None
-    if accession in cache.platforms:
-        return cache.platforms[accession]
-    platform = DimPlatform(platform_accession=accession)
-    session.add(platform)
-    session.flush()
-    cache.platforms[accession] = platform.platform_key
-    LOGGER.debug("Inserted platform %s -> %s", accession, platform.platform_key)
-    return platform.platform_key
+    return _get_or_create_unique_dimension(
+        session,
+        cache.platforms,
+        accession,
+        model=DimPlatform,
+        unique_column=DimPlatform.platform_accession,
+        key_attribute="platform_key",
+        log_label="platform",
+    )
 
 
 def get_or_create_illness(session: Session, cache: DimensionCache, label: str) -> int | None:
     if not label or label == UNKNOWN_VALUE:
         return None
-    if label in cache.illnesses:
-        return cache.illnesses[label]
-    illness = DimIllness(illness_label=label)
-    session.add(illness)
-    session.flush()
-    cache.illnesses[label] = illness.illness_key
-    LOGGER.debug("Inserted illness %s -> %s", label, illness.illness_key)
-    return illness.illness_key
+    return _get_or_create_unique_dimension(
+        session,
+        cache.illnesses,
+        label,
+        model=DimIllness,
+        unique_column=DimIllness.illness_label,
+        key_attribute="illness_key",
+        log_label="illness",
+    )
 
 
 def get_or_create_gene(session: Session, cache: DimensionCache, ensembl_id: str) -> int:
-    if ensembl_id in cache.genes:
-        return cache.genes[ensembl_id]
-    gene = DimGene(ensembl_id=ensembl_id)
-    session.add(gene)
-    session.flush()
-    cache.genes[ensembl_id] = gene.gene_key
-    LOGGER.debug("Inserted gene %s -> %s", ensembl_id, gene.gene_key)
-    return gene.gene_key
+    return _get_or_create_unique_dimension(
+        session,
+        cache.genes,
+        ensembl_id,
+        model=DimGene,
+        unique_column=DimGene.ensembl_id,
+        key_attribute="gene_key",
+        log_label="gene",
+    )
 
 
 def get_or_create_sample(

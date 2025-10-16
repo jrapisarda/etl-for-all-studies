@@ -12,6 +12,8 @@ from etl_for_all_studies.metadata_processing import SampleMetadata
 from etl_for_all_studies.models import Base, DimSample
 from etl_for_all_studies.repositories import (
     DimensionCache,
+    get_or_create_gene,
+    get_or_create_platform,
     get_or_create_sample,
     get_or_create_study,
 )
@@ -60,3 +62,30 @@ def test_get_or_create_sample_updates_existing_metadata() -> None:
     assert refreshed.illness.illness_label == "Influenza"
     assert refreshed.age == "32"
     assert refreshed.sex == "female"
+
+
+def test_get_or_create_gene_handles_existing_without_cache() -> None:
+    session = create_session()
+    cache = DimensionCache({}, {}, {}, {}, {})
+
+    first_key = get_or_create_gene(session, cache, "ENSG000001")
+    session.commit()
+
+    cache.genes.clear()
+    second_key = get_or_create_gene(session, cache, "ENSG000001")
+
+    assert first_key == second_key
+
+
+def test_get_or_create_platform_handles_existing_without_cache() -> None:
+    session = create_session()
+    cache = DimensionCache({}, {}, {}, {}, {})
+
+    first_key = get_or_create_platform(session, cache, "GPL570")
+    assert first_key is not None
+    session.commit()
+
+    cache.platforms.clear()
+    second_key = get_or_create_platform(session, cache, "GPL570")
+
+    assert first_key == second_key

@@ -4,10 +4,61 @@ from __future__ import annotations
 import datetime as dt
 import itertools
 import math
-from collections import defaultdict
+from collections import defaultdict, namedtuple
+from statistics import NormalDist
 from typing import Mapping
 
-from scipy.stats import spearmanr
+try:  # pragma: no cover - exercised when SciPy is available
+    from scipy.stats import spearmanr  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - lightweight fallback used in tests
+    _SpearmanResult = namedtuple("SpearmanResult", ["statistic", "pvalue"])
+
+    def _rankdata(values: list[float]) -> list[float]:
+        indexed = sorted(enumerate(values), key=lambda item: item[1])
+        ranks = [0.0] * len(values)
+        i = 0
+        while i < len(indexed):
+            j = i
+            total = 0.0
+            while j < len(indexed) and indexed[j][1] == indexed[i][1]:
+                total += j + 1
+                j += 1
+            avg_rank = total / (j - i)
+            for k in range(i, j):
+                ranks[indexed[k][0]] = avg_rank
+            i = j
+        return ranks
+
+    def _pearson(x: list[float], y: list[float]) -> float:
+        n = len(x)
+        if n == 0:
+            return math.nan
+        mean_x = sum(x) / n
+        mean_y = sum(y) / n
+        num = sum((a - mean_x) * (b - mean_y) for a, b in zip(x, y))
+        denom_x = math.sqrt(sum((a - mean_x) ** 2 for a in x))
+        denom_y = math.sqrt(sum((b - mean_y) ** 2 for b in y))
+        denom = denom_x * denom_y
+        if denom == 0:
+            return math.nan
+        return num / denom
+
+    def spearmanr(values_a: list[float], values_b: list[float]) -> tuple[float, float]:  # type: ignore
+        ranks_a = _rankdata(list(values_a))
+        ranks_b = _rankdata(list(values_b))
+        rho = _pearson(ranks_a, ranks_b)
+        if math.isnan(rho):
+            return _SpearmanResult(math.nan, math.nan)
+        n = len(values_a)
+        if n < 3:
+            return _SpearmanResult(rho, math.nan)
+        if abs(rho) >= 1.0:
+            return _SpearmanResult(max(min(rho, 1.0), -1.0), 0.0)
+        t_stat = rho * math.sqrt((n - 2) / (1 - rho**2))
+        dist = NormalDist()
+        p_value = 2 * (1 - dist.cdf(abs(t_stat)))
+        p_value = min(max(p_value, 0.0), 1.0)
+        return _SpearmanResult(rho, p_value)
 
 from .models import FactGenePairCorrelation
 
