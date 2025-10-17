@@ -64,3 +64,22 @@ def test_compute_gene_pair_correlations_without_illness_metadata() -> None:
 
     assert len(results) == 1
     assert results[0].illness_key is None
+
+
+def test_compute_gene_pair_correlations_handles_two_samples() -> None:
+    gene_expression = {
+        1: {"S1": 1.0, "S2": 2.0},
+        2: {"S1": 3.0, "S2": 4.0},
+    }
+
+    results = compute_gene_pair_correlations(
+        gene_expression,
+        sample_illness_map={},
+        study_key=42,
+    )
+
+    assert len(results) == 1
+    record = results[0]
+    assert record.n_samples == 2
+    assert 0.0 <= record.p_value <= 1.0
+    assert record.q_value is None

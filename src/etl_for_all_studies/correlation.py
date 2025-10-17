@@ -62,23 +62,27 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight fallback used in t
 
 from .models import FactGenePairCorrelation
 
-MIN_SAMPLES_FOR_CORRELATION = 3
+MIN_SAMPLES_FOR_CORRELATION = 2
 
 
-def _benjamini_hochberg(p_values: list[float]) -> list[float | None]:
+def _benjamini_hochberg(p_values: list[float | None]) -> list[float | None]:
     if not p_values:
         return []
 
-    m = len(p_values)
-    sorted_indices = sorted(range(m), key=lambda idx: p_values[idx])
-    adjusted = [None] * m
+    valid_indices = [
+        idx for idx, value in enumerate(p_values) if value is not None and not math.isnan(value)
+    ]
+
+    m = len(valid_indices)
+    adjusted = [None] * len(p_values)
+    if not m:
+        return adjusted
+
+    sorted_indices = sorted(valid_indices, key=lambda idx: float(p_values[idx]))
     prev = 1.0
 
     for rank, index in enumerate(reversed(sorted_indices), start=1):
-        p_val = p_values[index]
-        if math.isnan(p_val):
-            adjusted[index] = None
-            continue
+        p_val = float(p_values[index])
         raw = (p_val * m) / (m - rank + 1)
         value = min(prev, raw)
         prev = value
@@ -106,7 +110,7 @@ def compute_gene_pair_correlations(
 
     computed_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     gene_keys = sorted(gene_expression_by_sample.keys())
-    pair_stats: list[tuple[int, int, int, float, float]] = []
+    pair_stats: list[tuple[int, int, int, float, float | None]] = []
 
     for gene_a_key, gene_b_key in itertools.combinations(gene_keys, 2):
         expr_a = gene_expression_by_sample[gene_a_key]
@@ -124,10 +128,11 @@ def compute_gene_pair_correlations(
         result = spearmanr(values_a, values_b)
         rho = float(result.statistic)
         p_value = float(result.pvalue)
-        if math.isnan(rho) or math.isnan(p_value):
+        if math.isnan(rho):
             continue
 
-        pair_stats.append((gene_a_key, gene_b_key, len(shared_samples), rho, p_value))
+        stored_p_value: float | None = None if math.isnan(p_value) else p_value
+        pair_stats.append((gene_a_key, gene_b_key, len(shared_samples), rho, stored_p_value))
 
     if not pair_stats:
         return []
@@ -139,13 +144,14 @@ def compute_gene_pair_correlations(
     for (gene_a_key, gene_b_key, n_samples, rho, p_value), q_value in zip(
         pair_stats, q_values
     ):
+        stored_p_value = p_value if p_value is not None else 1.0
         correlations.append(
             FactGenePairCorrelation(
                 gene_a_key=gene_a_key,
                 gene_b_key=gene_b_key,
                 illness_key=None,
                 rho_spearman=rho,
-                p_value=p_value,
+                p_value=stored_p_value,
                 q_value=q_value,
                 n_samples=n_samples,
                 computed_at=computed_at,
