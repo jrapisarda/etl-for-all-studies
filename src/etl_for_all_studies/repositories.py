@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -33,6 +34,14 @@ class DimensionCache:
     platforms: dict[str, int]
     illnesses: dict[str, int]
     samples: dict[tuple[str, int], int]
+
+
+@dataclass(slots=True)
+class StudyDescriptor:
+    """Lightweight descriptor for studies with expression data."""
+
+    study_key: int
+    accession: str
 
 
 def bootstrap_cache(session: Session) -> DimensionCache:
@@ -291,16 +300,57 @@ def bulk_insert_gene_pair_correlations(
     session.add_all(records)
 
 
-def delete_gene_pair_correlations_for_study(session: Session, study_key: int) -> None:
-    session.execute(
+def delete_gene_pair_correlations_for_study(session: Session, study_key: int) -> int:
+    result = session.execute(
         delete(FactGenePairCorrelation).where(
             FactGenePairCorrelation.study_key == study_key
         )
     )
+    return int(result.rowcount or 0)
+
+
+def load_gene_expression_matrix(
+    session: Session, study_key: int
+) -> dict[int, dict[str, float]]:
+    rows = session.execute(
+        select(
+            FactExpression.gene_key,
+            DimSample.gsm_accession,
+            FactExpression.expression_value,
+        )
+        .join(DimSample, FactExpression.sample_key == DimSample.sample_key)
+        .where(FactExpression.study_key == study_key)
+    ).all()
+
+    matrix: dict[int, dict[str, float]] = defaultdict(dict)
+    for gene_key, sample_accession, expression_value in rows:
+        matrix[gene_key][sample_accession] = expression_value
+    return matrix
+
+
+def iter_studies_with_expression(
+    session: Session, study_accessions: Iterable[str] | None = None
+) -> list[StudyDescriptor]:
+    stmt = (
+        select(DimStudy.study_key, DimStudy.gse_accession)
+        .join(FactExpression, FactExpression.study_key == DimStudy.study_key)
+        .group_by(DimStudy.study_key, DimStudy.gse_accession)
+        .order_by(DimStudy.gse_accession)
+    )
+
+    if study_accessions:
+        requested = [accession for accession in dict.fromkeys(study_accessions) if accession]
+        if not requested:
+            return []
+        stmt = stmt.where(DimStudy.gse_accession.in_(requested))
+
+    rows = session.execute(stmt).all()
+    return [StudyDescriptor(study_key=row.study_key, accession=row.gse_accession) for row in rows]
 
 
 __all__ = [
     "DimensionCache",
+    "StudyDescriptor",
     "bootstrap_cache",
     "get_or_create_gene",
     "get_or_create_sample",
@@ -310,6 +360,8 @@ __all__ = [
     "bulk_insert_expression_records",
     "bulk_insert_gene_pair_correlations",
     "delete_gene_pair_correlations_for_study",
+    "iter_studies_with_expression",
+    "load_gene_expression_matrix",
     "upsert_state",
     "clear_state",
 ]
