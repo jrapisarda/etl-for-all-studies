@@ -5,15 +5,13 @@ import concurrent.futures
 import logging
 import pathlib
 import time
-from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import AppConfig
-from .correlation import compute_gene_pair_correlations
 from .database import create_engine_with_retries, create_session_factory
 from .expression_processing import ExpressionFormatError, iter_filtered_expression
 from .gene_filter import load_gene_filter
@@ -29,14 +27,11 @@ from .models import Base, EtlStudyState, FactExpression
 from .repositories import (
     DimensionCache,
     bulk_insert_expression_records,
-    bulk_insert_gene_pair_correlations,
     bootstrap_cache,
     clear_state,
-    delete_gene_pair_correlations_for_study,
     get_or_create_gene,
     get_or_create_sample,
     get_or_create_study,
-    get_or_create_illness,
     upsert_state,
 )
 
@@ -119,27 +114,6 @@ def _load_existing_expression_keys(session: Session, study_key: int) -> set[tupl
     return {(sample_key, gene_key) for sample_key, gene_key in rows}
 
 
-def _load_existing_expression_matrix(
-    session: Session,
-    study_key: int,
-    sample_key_to_accession: Mapping[int, str],
-) -> defaultdict[int, dict[str, float]]:
-    rows = session.execute(
-        select(
-            FactExpression.gene_key,
-            FactExpression.sample_key,
-            FactExpression.expression_value,
-        ).where(FactExpression.study_key == study_key)
-    ).all()
-    matrix: defaultdict[int, dict[str, float]] = defaultdict(dict)
-    for gene_key, sample_key, expression_value in rows:
-        sample_accession = sample_key_to_accession.get(sample_key)
-        if sample_accession is None:
-            continue
-        matrix[gene_key][sample_accession] = expression_value
-    return matrix
-
-
 def _process_metadata(
     session: Session,
     cache: DimensionCache,
@@ -207,29 +181,12 @@ def _process_expression(
         sample_key_map[sample.gsm_accession] = sample_key
 
     expected_samples = set(sample_key_map.keys())
-    sample_key_to_accession = {value: key for key, value in sample_key_map.items()}
 
     existing_facts = _load_existing_expression_keys(session, study_key)
 
     batch: list[FactExpression] = []
     total_records = 0
     total_genes = set()
-
-    if existing_facts:
-        gene_expression_by_sample: defaultdict[int, dict[str, float]] = (
-            _load_existing_expression_matrix(session, study_key, sample_key_to_accession)
-        )
-    else:
-        gene_expression_by_sample = defaultdict(dict)
-    sample_illness_map: dict[str, int | None] = {}
-    for sample in samples:
-        illness_key = None
-        if sample.illness_label and sample.illness_label != UNKNOWN_VALUE:
-            illness_key = cache.illnesses.get(sample.illness_label)
-            if illness_key is None:
-                illness_key = get_or_create_illness(session, cache, sample.illness_label)
-        sample_illness_map[sample.gsm_accession] = illness_key
-
     last_gene = resume_gene
     last_sample = resume_sample_index
 
@@ -245,7 +202,6 @@ def _process_expression(
         gene_key = get_or_create_gene(session, cache, row.gene_id)
         sample_key = sample_key_map[row.sample_accession]
         cache.samples[(row.sample_accession, study_key)] = sample_key
-        gene_expression_by_sample[gene_key][row.sample_accession] = row.expression_value
 
         fact_identity = (sample_key, gene_key)
         if fact_identity in existing_facts:
@@ -284,16 +240,6 @@ def _process_expression(
             metadata_loaded=True,
         )
         session.commit()
-
-    delete_gene_pair_correlations_for_study(session, study_key)
-    correlations = compute_gene_pair_correlations(
-        gene_expression_by_sample,
-        sample_illness_map=sample_illness_map,
-        study_key=study_key,
-    )
-    if correlations:
-        bulk_insert_gene_pair_correlations(session, correlations)
-    session.commit()
 
     if config.logging.log_record_counts:
         LOGGER.info(
